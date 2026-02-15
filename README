@@ -1,0 +1,8 @@
+# 로봇 메인 함수
+dot_drawer_action.py
+
+# 순서명령 모듈
+stipple_robot_planner.py
+
+# 더미 클라이언트 (웹 대신)
+draw_stipple_dummy_client.py

@@ -148,7 +148,6 @@ class DotDrawerAction(Node):
         t0 = time.time()
 
         req = goal_handle.request
-        dry_run = False #일단 없앰.
         incoming: DotArray = req.data
 
         # ---- 동작 파라미터(기존 유지) ----
@@ -182,29 +181,6 @@ class DotDrawerAction(Node):
             res.success = True
             return res
 
-        self.get_logger().info(f"Draw start: {total} dots (dry_run={dry_run})")
-
-        # dry_run이면 로봇을 안 움직이고 진행률만 흉내
-        if dry_run:
-            for i, (x, y, v) in enumerate(plan, start=1):
-                if goal_handle.is_cancel_requested:
-                    self.get_logger().warn("Canceled (dry_run)")
-                    goal_handle.canceled()
-                    self._busy = False
-                    res = DrawStipple.Result()
-                    res.success = False
-                    return res
-
-                # 너무 빠르면 UI가 못 따라올 수 있으니 약간 sleep (필요 없으면 줄여도 됨)
-                if i == 1 or (i % 10 == 0) or i == total:
-                    self._publish_feedback(goal_handle, i, total, v)
-                time.sleep(0.001)
-
-            goal_handle.succeed()
-            self._busy = False
-            res = DrawStipple.Result()
-            res.success = True
-            return res
 
         # 2) 실제 점찍기 실행 (기존 코드 최대 유지)
         try:
@@ -223,9 +199,10 @@ class DotDrawerAction(Node):
             self._publish_feedback(goal_handle, 1, total, prev_v)
 
             for i in range(total - 1):
+                # cancle request가 들어왔을 경우.
                 if goal_handle.is_cancel_requested:
                     self.get_logger().warn("Canceled by client")
-                    # 안전하게 들어올리고 원위치
+                    # 안전하게 들어올리고 원위치.
                     try:
                         x_cur, y_cur, _ = plan[i]
                         lift_high_at_xy(x_cur, y_cur, z_lift, rx, ry, rz, VELOCITY, ACC)
@@ -238,6 +215,7 @@ class DotDrawerAction(Node):
                     res.success = False
                     return res
 
+                # 여기서부터 찍기코드
                 x1, y1, v1 = plan[i]
                 x2, y2, v2 = plan[i + 1]
                 v2 = int(v2)

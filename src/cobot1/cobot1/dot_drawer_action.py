@@ -10,12 +10,12 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from dot_msgs.action import DrawStipple
 from dot_msgs.msg import DotArray
 
-# Module 2 planner (v-grouping + ordering + workspace mapping)
+# Module 2 planner (workspace mapping + ordering)
 try:
-    from .stipple_robot_planner import plan_stipple_path, Workspace, InputSpec, PlannerConfig
+    from .robot_module.stipple_robot_planner import convert_to_robot_coords
 except ImportError:
-    from stipple_robot_planner import plan_stipple_path, Workspace, InputSpec, PlannerConfig
-
+    # fallback when running as a script (not as an installed package)
+    from robot_module.stipple_robot_planner import convert_to_robot_coords
 
 # ==============================
 # 로봇 설정
@@ -93,30 +93,19 @@ def go_xy_up(x, y, z_up, rx, ry, rz, vel, acc):
 class DotDrawerAction(Node):
     def __init__(self):
         super().__init__("dot_drawer_action", namespace=ROBOT_ID)
-
-        # planner configs (필요하면 ROS param으로 빼도 됨)
-        self.ws = Workspace(
-            x_left=float(X_LEFT),
-            x_right=float(X_RIGHT),
-            y_top=float(Y_TOP),
-            y_bottom=float(Y_BOTTOM),
-            invert_y=False,
-            clamp=True
-        )
-        # IMPORTANT: Goal에 img_w/img_h가 없으니, 기본은 normalized(0~1)로 가정
-        self.inp = InputSpec(normalized_xy=True)
-        self.cfg = PlannerConfig(cell_size=5.0, start_pos=None)
+        # planner config (kept minimal for new planner module)
+        self._planner_img_w = 1.0
+        self._planner_img_h = 1.0
 
         self._busy = False
 
-        # Action 프로토콜 전체를 여는 부분.
         self._action_server = ActionServer(
             self,
             DrawStipple,
             "/draw_stipple",
-            execute_callback=self.execute_callback,     # goal이 accept되면 실행되는 본체. 여기서 Result를 리턴하면 Action이 끝나고 클라이언트가 결과를 받음
-            goal_callback=self.goal_callback,           # 받을지 말지
-            cancel_callback=self.cancel_callback,       # cancle 요청시 호출
+            execute_callback=self.execute_callback,
+            goal_callback=self.goal_callback,
+            cancel_callback=self.cancel_callback,
         )
 
         self.get_logger().info("ActionServer ready: /draw_stipple (dot_msgs/DrawStipple)")
@@ -173,7 +162,9 @@ class DotDrawerAction(Node):
 
         # 1) (v별) 순서 최적화 + 작업영역 좌표 변환
         try:
-            plan = plan_stipple_path(incoming, ws=self.ws, inp=self.inp, cfg=self.cfg)
+            point_list = [(d.x, d.y, d.v) for d in incoming.dots]
+            ########### 모듈 사용하는 지점 ############
+            plan = convert_to_robot_coords(point_list, img_w=self._planner_img_w, img_h=self._planner_img_h)
         except Exception as e:
             self.get_logger().error(f"Planner error: {e}")
             goal_handle.abort()
@@ -232,9 +223,10 @@ class DotDrawerAction(Node):
             self._publish_feedback(goal_handle, 1, total, prev_v)
 
             for i in range(total - 1):
+                # cancle request가 들어왔을 경우.
                 if goal_handle.is_cancel_requested:
                     self.get_logger().warn("Canceled by client")
-                    # 안전하게 들어올리고 원위치
+                    # 안전하게 들어올리고 원위치.
                     try:
                         x_cur, y_cur, _ = plan[i]
                         lift_high_at_xy(x_cur, y_cur, z_lift, rx, ry, rz, VELOCITY, ACC)
@@ -247,15 +239,16 @@ class DotDrawerAction(Node):
                     res.success = False
                     return res
 
+                # 여기서부터 찍기코드
                 x1, y1, v1 = plan[i]
                 x2, y2, v2 = plan[i + 1]
                 v2 = int(v2)
 
-                # 색이 바뀔 경우 들어올리기 (임시)
+                # 색이 바뀔 경우 들어올리기
                 if i > 0 and v2 != prev_v:
                     self.get_logger().info(f"v change {prev_v} -> {v2}: lift")
-                    lift_high_at_xy(x1, y1, z_lift, rx, ry, rz, VELOCITY, ACC) # 들어올리는걸로 구현한 임시 코드
-                    go_xy_up(x2, y2, z_up, rx, ry, rz, VELOCITY, ACC)   # 다음 찍을 위치로 이동
+                    lift_high_at_xy(x1, y1, z_lift, rx, ry, rz, VELOCITY, ACC)
+                    go_xy_up(x2, y2, z_up, rx, ry, rz, VELOCITY, ACC)
                     prev_v = v2
 
                 movec_mid_to_next_down(
@@ -274,12 +267,10 @@ class DotDrawerAction(Node):
             movej(JReady, vel=VELOCITY, acc=ACC)
             self.get_logger().info(f"Drawing done ({total} dots). elapsed={time.time()-t0:.2f}s")
 
-            # Action의 result 부분
-            goal_handle.succeed()       # 1.액션 상태를 succeed로 확정
-            res = DrawStipple.Result()  # Action의 result 부분을 True로 설정.
+            goal_handle.succeed()
+            res = DrawStipple.Result()
             res.success = True
-            return res                  # 2.결과 payload를 실제로 전달. 
-                                        # 1,2 둘다 있어야 클라이언트가 정상적으로 받는다.
+            return res
 
         except Exception as e:
             self.get_logger().error(f"Drawing error: {e}")

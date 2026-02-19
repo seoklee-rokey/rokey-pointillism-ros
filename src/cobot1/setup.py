@@ -28,9 +28,11 @@ setup(
             'dot_drawer_movec = cobot1.dot_drawer_movec:main',
             'dot_drawer_movec_dev = cobot1.dot_drawer_movec_dev:main',
             'dot_drawer_action = cobot1.dot_drawer_action:main',
+            'dot_drawer_action_dev = cobot1.dot_drawer_action_dev:main',
             'pub_dummy_heart = cobot1.pub_dummy_heart:main',
             'pub_sm = cobot1.pub_sm:main',
             'pub_sm_dev = cobot1.pub_sm_dev:main',
+            'draw_stipple_dummy_client = cobot1.draw_stipple_dummy_client:main',
         ],
     },
 )

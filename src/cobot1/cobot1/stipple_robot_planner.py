@@ -1,207 +1,123 @@
-# stipple_robot_planner.py
-from __future__ import annotations
-from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional, Iterable
-import math
+# robot_mapper.py
 
-# dot_msgs imports (로봇 패키지에서 사용)
-# from dot_msgs.msg import Dot, DotArray
-
-@dataclass
-class Workspace:
-    x_left: float = 320.0
-    x_right: float = 500.0
-    y_top: float = 0.0
-    y_bottom: float = 120.0
-    invert_y: bool = False        # 필요하면 True
-    clamp: bool = True            # 작업영역 밖 값이 오면 클램프
+# ===== 로봇 작업 영역 =====
+X_LEFT = 320
+Y_TOP = 0
+X_RIGHT = 500
+Y_BOTTOM = 120
 
 
-@dataclass
-class InputSpec:
-    normalized_xy: bool = True    # True면 x,y가 0~1
-    img_w: float = 1.0            # normalized면 의미 없음
-    img_h: float = 1.0            # normalized면 의미 없음
+# --------------------------------------------------
+# Grid 기반 NN 정렬
+def order_points_nn(points, cell_size=10):
 
-
-@dataclass
-class PlannerConfig:
-    # NN grid 크기 (로봇 좌표 단위)
-    cell_size: float = 5.0
-    # 그룹 간 선택 기준 시작점 (None이면 첫 그룹은 가장 점 많은 v로 시작)
-    start_pos: Optional[Tuple[float, float]] = None
-
-
-def _clamp(v: float, lo: float, hi: float) -> float:
-    return lo if v < lo else hi if v > hi else v
-
-
-def map_to_workspace(x: float, y: float, ws: Workspace, inp: InputSpec) -> Tuple[float, float]:
-    """
-    (x,y)를 로봇 작업영역 (rx,ry)로 맵핑.
-    - inp.normalized_xy=True: x,y는 [0,1]로 가정
-    - False: x,y는 픽셀, img_w/img_h 필요
-    """
-    if inp.normalized_xy:
-        nx = x
-        ny = y
-    else:
-        if inp.img_w <= 0 or inp.img_h <= 0:
-            raise ValueError("img_w/img_h must be > 0 when normalized_xy=False")
-        nx = x / inp.img_w
-        ny = y / inp.img_h
-
-    if ws.invert_y:
-        ny = 1.0 - ny
-
-    rx = ws.x_left + nx * (ws.x_right - ws.x_left)
-    ry = ws.y_top  + ny * (ws.y_bottom - ws.y_top)
-
-    if ws.clamp:
-        rx = _clamp(rx, min(ws.x_left, ws.x_right), max(ws.x_left, ws.x_right))
-        ry = _clamp(ry, min(ws.y_top, ws.y_bottom), max(ws.y_top, ws.y_bottom))
-
-    return rx, ry
-
-
-def order_points_nn(points: List[Tuple[float, float]],
-                    start: Optional[Tuple[float, float]] = None,
-                    cell_size: float = 5.0) -> List[Tuple[float, float]]:
-    """
-    pub_sm의 grid 기반 NN 정렬을 'float 좌표'로 일반화한 버전.
-    """
-    if not points:
+    if len(points) == 0:
         return []
 
     pts = points.copy()
-    grid: Dict[Tuple[int, int], List[Tuple[float, float]]] = {}
+    grid = {}
 
-    def cell_coord(p: Tuple[float, float]) -> Tuple[int, int]:
-        return (int(math.floor(p[0] / cell_size)), int(math.floor(p[1] / cell_size)))
+    def cell_coord(p):
+        return (int(p[0]) // cell_size, int(p[1]) // cell_size)
 
     for p in pts:
         c = cell_coord(p)
         grid.setdefault(c, []).append(p)
 
-    def remove_point(p: Tuple[float, float]) -> None:
+    def remove_point(p):
         c = cell_coord(p)
-        bucket = grid.get(c)
-        if not bucket:
-            return
-        # 동일 좌표 중복 가능하니 remove는 1회만
-        bucket.remove(p)
-        if not bucket:
+        grid[c].remove(p)
+        if not grid[c]:
             del grid[c]
 
-    def dist2(a: Tuple[float, float], b: Tuple[float, float]) -> float:
-        dx = a[0] - b[0]
-        dy = a[1] - b[1]
-        return dx*dx + dy*dy
-
-    # 시작점 결정
-    if start is None:
-        current = pts[0]
-    else:
-        current = min(pts, key=lambda p: dist2(p, start))
-
+    current = pts[0]
+    ordered = [current]
     remove_point(current)
     pts.remove(current)
 
-    ordered = [current]
-
-    def find_nearby_point(cur: Tuple[float, float]) -> Tuple[float, float]:
+    def find_nearest(cur):
         cx, cy = cell_coord(cur)
         radius = 0
+
         while True:
-            # radius 링만 탐색
             for dx in range(-radius, radius + 1):
                 for dy in range(-radius, radius + 1):
-                    if radius != 0 and (abs(dx) != radius and abs(dy) != radius):
+
+                    if abs(dx) != radius and abs(dy) != radius:
                         continue
+
                     cell = (cx + dx, cy + dy)
-                    bucket = grid.get(cell)
-                    if bucket:
-                        return min(bucket, key=lambda p: dist2(p, cur))
+
+                    if cell in grid and grid[cell]:
+                        return min(
+                            grid[cell],
+                            key=lambda p:
+                            (p[0]-cur[0])**2 + (p[1]-cur[1])**2
+                        )
             radius += 1
 
+
     while pts:
-        nxt = find_nearby_point(current)
-        ordered.append(nxt)
-        remove_point(nxt)
-        pts.remove(nxt)
-        current = nxt
+        next_pt = find_nearest(current)
+        ordered.append(next_pt)
+        remove_point(next_pt)
+        pts.remove(next_pt)
+        current = next_pt
 
     return ordered
 
 
-def plan_stipple_path(dot_array,
-                      ws: Workspace = Workspace(),
-                      inp: InputSpec = InputSpec(),
-                      cfg: PlannerConfig = PlannerConfig()
-                      ) -> List[Tuple[float, float, int]]:
+# --------------------------------------------------
+# 점묘화 → 로봇 좌표 변환
+def convert_to_robot_coords(point_list, img_w, img_h):
     """
-    입력: dot_msgs/DotArray (dot_array.dots: [Dot(x,y,v), ...])
-    출력: [(rx, ry, v), ...]  # v별 그룹핑 + 그룹 내부 NN + 그룹 간 순서 최적화 완료
+    point_list: [(x, y, v), ...]
+    img_w, img_h: 이미지 크기
+    return: [(rx, ry, v), ...]
     """
 
-    # 1) v별 그룹핑 + 로봇좌표로 변환
-    groups: Dict[int, List[Tuple[float, float]]] = {}
-    for d in dot_array.dots:
-        v = int(d.v)
-        rx, ry = map_to_workspace(float(d.x), float(d.y), ws, inp)
-        groups.setdefault(v, []).append((rx, ry))
-
-    if not groups:
+    if not point_list:
         return []
 
-    # 2) 그룹 간 순서 결정 + 그룹 내부 NN
-    def dist2(a: Tuple[float, float], b: Tuple[float, float]) -> float:
-        dx = a[0] - b[0]
-        dy = a[1] - b[1]
-        return dx*dx + dy*dy
+    work_w = X_RIGHT - X_LEFT
+    work_h = Y_BOTTOM - Y_TOP
 
-    remaining = set(groups.keys())
-    path: List[Tuple[float, float, int]] = []
+    img_ratio = img_w / img_h
+    work_ratio = work_w / work_h
 
-    # 시작점: 지정 없으면 "가장 점 많은 v"를 첫 그룹으로 (합리적 기본값)
-    if cfg.start_pos is None:
-        first_v = max(remaining, key=lambda vv: len(groups[vv]))
-        current_pos: Optional[Tuple[float, float]] = None
-        next_v = first_v
+    if img_ratio > work_ratio:
+        scale = work_w / img_w
     else:
-        current_pos = cfg.start_pos
-        # start_pos에서 가장 가까운 그룹 고르기 (그룹의 어떤 점이든 최소거리 기준)
-        next_v = min(
-            remaining,
-            key=lambda vv: min(dist2(p, current_pos) for p in groups[vv])
+        scale = work_h / img_h
+
+    draw_w = img_w * scale
+    draw_h = img_h * scale
+
+    offset_x = X_LEFT + (work_w - draw_w) / 2
+    offset_y = Y_TOP  + (work_h - draw_h) / 2
+
+    robot_list = []
+
+    # 색상 인덱스 기준 정렬
+    sorted_points = sorted(point_list, key=lambda p: p[2])
+
+    # 색상별 Grid NN 정렬
+    from itertools import groupby
+
+    for color_index, group in groupby(sorted_points, key=lambda p: p[2]):
+
+        group_pts = [(p[0], p[1], p[2]) for p in group]
+
+        # NN은 x,y 기준으로만
+        ordered_xy = order_points_nn(
+            [(p[0], p[1]) for p in group_pts]
         )
 
-    while remaining:
-        v = next_v
-        remaining.remove(v)
+        for x, y in ordered_xy:
 
-        pts = groups[v]
+            rx = offset_x + x * scale
+            ry = offset_y + y * scale
 
-        # 그룹 내부: 현재 위치에 가장 가까운 점을 start로 잡아 NN 정렬
-        if current_pos is None:
-            ordered_pts = order_points_nn(pts, start=None, cell_size=cfg.cell_size)
-        else:
-            ordered_pts = order_points_nn(pts, start=current_pos, cell_size=cfg.cell_size)
+            robot_list.append((rx, ry, color_index))
 
-        # path에 (rx,ry,v)로 append
-        for (rx, ry) in ordered_pts:
-            path.append((rx, ry, v))
-
-        # 현재 위치 갱신 (그룹의 마지막 점)
-        current_pos = ordered_pts[-1]
-
-        if not remaining:
-            break
-
-        # 다음 그룹 선택: 현재 위치에서 "가장 가까운 그룹" (그룹 내 점 중 최소거리)
-        next_v = min(
-            remaining,
-            key=lambda vv: min(dist2(p, current_pos) for p in groups[vv])
-        )
-
-    return path
+    return robot_list

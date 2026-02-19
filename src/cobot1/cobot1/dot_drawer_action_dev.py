@@ -12,10 +12,10 @@ from dot_msgs.msg import DotArray
 
 # Module 2 planner (workspace mapping + ordering)
 try:
-    from .stipple_robot_planner import convert_to_robot_coords
+    from .robot_module.stipple_robot_planner import convert_to_robot_coords
 except ImportError:
     # fallback when running as a script (not as an installed package)
-    from stipple_robot_planner import convert_to_robot_coords
+    from robot_module.stipple_robot_planner import convert_to_robot_coords
 
 # ==============================
 # 로봇 설정

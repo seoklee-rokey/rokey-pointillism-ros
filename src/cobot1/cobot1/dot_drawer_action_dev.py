@@ -144,12 +144,22 @@ class DotDrawerAction(Node):
 
         self._busy = True
         t0 = time.time()
-        
+
         req = goal_handle.request
         incoming: DotArray = req.data
 
         img_w = float(incoming.width)
         img_h = float(incoming.height)  
+        
+        ### 디버깅용 ###
+        self.get_logger().info(
+            f"[Goal Received] width={img_w}, height={img_h}, dot_count={len(incoming.dots)}"
+        )
+        for i, d in enumerate(incoming.dots[:3]):
+            self.get_logger().info(
+                f"[Dot {i}] x={d.x}, y={d.y}, v={d.v}"
+            )
+        ###############
 
         # ---- 동작 파라미터(기존 유지) ----
         JReady = [0, 0, 90, 0, 90, 0]
@@ -195,6 +205,10 @@ class DotDrawerAction(Node):
             # 첫 점 찍기
             movel(posx([x0, y0, z_down, rx, ry, rz]), vel=VELOCITY, acc=ACC)
             movel(posx([x0, y0, z_up, rx, ry, rz]), vel=VELOCITY, acc=ACC)
+            
+            ### 디버깅용 ###
+            self.get_logger().info(f"[DRAW] 1/{total} 번째 점 완료 (v={prev_v})")
+            ###############
 
             # feedback (첫 점 완료)
             self._publish_feedback(goal_handle, 1, total, prev_v)
@@ -238,8 +252,12 @@ class DotDrawerAction(Node):
 
                 # feedback throttle: 매 점마다.
                 done = i + 2
-                if done == total or (done % 1 == 0): #매n점 마다.
-                    self._publish_feedback(goal_handle, done, total, prev_v)
+
+                ### 디버깅용 ###
+                self.get_logger().info(f"[DRAW] {done}/{total} 번째 점 완료 (v={prev_v})")
+                ##############
+
+                self._publish_feedback(goal_handle, done, total, prev_v)
 
             movej(JReady, vel=VELOCITY, acc=ACC)
             self.get_logger().info(f"Drawing done ({total} dots). elapsed={time.time()-t0:.2f}s")

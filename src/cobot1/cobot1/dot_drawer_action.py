@@ -144,13 +144,10 @@ class DotDrawerAction(Node):
 
         req = goal_handle.request
         incoming: DotArray = req.data
-
-        img_w = float(incoming.width)
-        img_h = float(incoming.height)  
         
         ### 디버깅용 ###
         self.get_logger().info(
-            f"[Goal Received] width={img_w}, height={img_h}, dot_count={len(incoming.dots)}"
+            f"[Goal Received] dot_count={len(incoming.dots)}"
         )
         for i, d in enumerate(incoming.dots[:3]):
             self.get_logger().info(

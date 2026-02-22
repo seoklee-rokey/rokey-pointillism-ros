@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-# 1차 개발완료 정상작동 코드
+# 여러가지 색상으로 점묘화 만들기.
+# 펜 팔레트 좌표 저장.
 
 import rclpy
 import DR_init
@@ -13,7 +14,6 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from dot_msgs.action import DrawStipple
 from dot_msgs.msg import DotArray
 
-
 # ==============================
 # 로봇 설정
 # ==============================
@@ -22,17 +22,67 @@ ROBOT_MODEL = "m0609"
 ROBOT_TOOL = "Tool Weight"
 ROBOT_TCP = "GripperDA_v1"
 
-VELOCITY = 200
-ACC = 200
-
 DR_init.__dsr__id = ROBOT_ID
 DR_init.__dsr__model = ROBOT_MODEL
 
-# pub_sm과 동일 작업영역 기본값
-X_LEFT = 320
-Y_TOP = 0
-X_RIGHT = 500
-Y_BOTTOM = 120
+# 이동 속도 및 가속도
+VELOCITY = 300
+ACC = 300
+
+# ===============================
+# 그리퍼용 설정값
+# ===============================
+PEN_Z_UP   = 120
+PEN_TRAVEL_Z = PEN_Z_UP + 100 
+PEN_Z_DOWN =  90
+PEN_PICK_TABLE = {
+    1:  (518.559, -305.257),
+    2:  (518.559, -266.600),
+    3:  (518.559, -227.943),
+    4:  (518.559, -189.286),
+    5:  (518.559, -150.629),
+    6:  (518.559, -111.972),
+
+    7:  (367.544, -305.257),
+    8:  (367.544, -266.600),
+    9:  (367.544, -227.943),
+    10: (367.544, -189.286),
+    11: (367.544, -150.629),
+    12: (367.544, -111.972),
+
+    13: (227.506, -305.289),
+    14: (227.506, -266.626),
+    15: (227.506, -227.962),
+    16: (227.506, -189.299),
+    17: (227.506, -150.635),
+    18: (227.506, -111.972),
+}
+
+# 디지털 출력상태
+ON,OFF = 1,0
+# set
+DO_GRIP = 1       # set_digital_output(1, ON)  -> Grip
+DO_RELEASE = 2    # set_digital_output(2, ON)  -> Release
+# get
+DI_GRIP = 1       # get_digital_input(1)       -> Grip 완료
+DI_RELEASE = 2    # get_digital_input(2)       -> Release 완료
+
+def wait_digital_input(sig_num, wait_fn, get_di_fn):
+    while not get_di_fn(sig_num):
+        wait_fn(0.1)
+
+def gripper_release(set_do_fn, wait_fn, get_di_fn):
+    # Release 동작
+    set_do_fn(DO_RELEASE, ON)
+    set_do_fn(DO_GRIP, OFF)
+    wait_digital_input(DI_RELEASE, wait_fn, get_di_fn)
+
+def gripper_grip(set_do_fn, wait_fn, get_di_fn):
+    # Grip 동작
+    set_do_fn(DO_GRIP, ON)
+    set_do_fn(DO_RELEASE, OFF)
+    wait_digital_input(DI_GRIP, wait_fn, get_di_fn)
+
 
 
 # ==============================
@@ -53,16 +103,13 @@ def initialize_robot():
 
 
 # ------------------------------
-# 원본 movec 패턴을 함수로 분리
+# 원본 movec 패턴을 함수로 분리 # 변경 로직 적용
 # ------------------------------
-def movec_mid_to_next_down(x1, y1, x2, y2,
+def movec_mid_to_next_down(x2, y2,
                           z_up, z_down, rx, ry, rz, vel, acc, ra):
     from DSR_ROBOT2 import posx, movec
 
-    xm = 0.5 * (x1 + x2)
-    ym = 0.5 * (y1 + y2)
-
-    via = posx([xm, ym, z_up,   rx, ry, rz])
+    via = posx([x2, y2, 72,   rx, ry, rz]) # 일단 72로 정해둠.
     tgt = posx([x2, y2, z_down, rx, ry, rz])
 
     movec(via, tgt, vel=vel, acc=acc, ra=ra)
@@ -82,6 +129,65 @@ def lift_high_at_xy(x, y, z_lift, rx, ry, rz, vel, acc):
 def go_xy_up(x, y, z_up, rx, ry, rz, vel, acc):
     from DSR_ROBOT2 import posx, movel
     movel(posx([x, y, z_up, rx, ry, rz]), vel=vel, acc=acc)
+
+
+# ------------------------------
+# 펜 변경 로직
+# ------------------------------
+def change_pen_by_v(prev_v: int, target_v: int, rx, ry, rz, vel, acc):
+    """
+    펜교체 & 최소 펜 pick
+    - prev_v가 None이면: target_v 펜만 pick
+    - prev_v != target_v이면: prev_v 내려놓고 target_v pick
+    - 스테이션 간 이동은 PEN_TRAVEL_Z로 안전하게 이동
+    """
+    from DSR_ROBOT2 import posx, movel, set_digital_output, get_digital_input, wait
+
+    # 예외처리) Pick table에 정의 안 된 색상이면 펜교체 스킾하고 그냥 계속 찍음
+    if target_v not in PEN_PICK_TABLE:
+        return
+    
+    # 예외처리) prev == target면 아무것도 안 함
+    if prev_v == target_v:
+        return
+
+    # 최초엔 gripper open 보장
+    if prev_v is None:
+        gripper_release(set_digital_output, wait, get_digital_input)
+
+        pick_x, pick_y = PEN_PICK_TABLE[target_v]
+        # 스테이션 접근(충돌 방지 높이)
+        movel(posx([pick_x, pick_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=vel, acc=acc)
+        movel(posx([pick_x, pick_y, PEN_Z_UP,      rx, ry, rz]), vel=vel, acc=acc)
+        movel(posx([pick_x, pick_y, PEN_Z_DOWN,    rx, ry, rz]), vel=vel, acc=acc)
+        gripper_grip(set_digital_output, wait, get_digital_input)
+        movel(posx([pick_x, pick_y, PEN_Z_UP,      rx, ry, rz]), vel=vel, acc=acc)
+        movel(posx([pick_x, pick_y, PEN_TRAVEL_Z,  rx, ry, rz]), vel=vel, acc=acc)
+        return
+    
+    # 예외처리) prev 정의 안 된 경우(테이블에 없으면) -> 그냥 pick만
+    if prev_v not in PEN_PICK_TABLE:
+        change_pen_by_v(None, target_v, rx, ry, rz, vel, acc)
+        return
+    
+    put_x, put_y   = PEN_PICK_TABLE[prev_v]
+    pick_x, pick_y = PEN_PICK_TABLE[target_v]
+
+    # prev_v 펜 내려놓기
+    movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=vel, acc=acc)
+    movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
+    movel(posx([put_x, put_y, PEN_Z_DOWN,   rx, ry, rz]), vel=vel, acc=acc)
+    gripper_release(set_digital_output, wait, get_digital_input)
+    movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
+    movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=vel, acc=acc)
+
+    # target_v 펜 집기+ 들어올리기 
+    movel(posx([pick_x, pick_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=vel, acc=acc)
+    movel(posx([pick_x, pick_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
+    movel(posx([pick_x, pick_y, PEN_Z_DOWN,   rx, ry, rz]), vel=vel, acc=acc)
+    gripper_grip(set_digital_output, wait, get_digital_input)
+    movel(posx([pick_x, pick_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
+    movel(posx([pick_x, pick_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=vel, acc=acc)
 
 
 # ==============================
@@ -139,13 +245,16 @@ class DotDrawerAction(Node):
     def execute_callback(self, goal_handle):
         from DSR_ROBOT2 import posx, movej, movel, DR_MV_RA_OVERRIDE
 
+        # ---------------------------
+        # 파라미터 설정 및 디버깅
+        # ---------------------------
         self._busy = True
         t0 = time.time()
 
         req = goal_handle.request
-        incoming: DotArray = req.data
+        incoming: DotArray = req.data  # incoming이 좌표데이터 리스트임
         
-        ### 디버깅용 ###
+        # 디버깅용
         self.get_logger().info(
             f"[Goal Received] dot_count={len(incoming.dots)}"
         )
@@ -153,21 +262,17 @@ class DotDrawerAction(Node):
             self.get_logger().info(
                 f"[Dot {i}] x={d.x}, y={d.y}, v={d.v}"
             )
-        ###############
 
-        # ---- 동작 파라미터(기존 유지) ----
+        # 동작 파라미터 
         JReady = [0, 0, 90, 0, 90, 0]
-        
         z_up = 74
         z_down = 68
         z_lift = z_up + 30
-
         rx, ry, rz = 150, 179, 150
 
-        # 1) (v별) 순서 최적화 + 작업영역 좌표 변환
+        # 순서 받아오기
         try:
             point_list = [(d.x, d.y, d.v) for d in incoming.dots]
-            ########### 어떻게 입력할지 사용하는 지점 ###################################### 중요! ###############
             plan = point_list
         except Exception as e:
             self.get_logger().error(f"Planner error: {e}")
@@ -176,8 +281,10 @@ class DotDrawerAction(Node):
             res = DrawStipple.Result()
             res.success = False
             return res
-
+        
         total = len(plan)
+        
+        # 예외처리) total 0일경우 종료
         if total == 0:
             self.get_logger().warn("No dots after planning.")
             goal_handle.succeed()
@@ -186,26 +293,34 @@ class DotDrawerAction(Node):
             res.success = True
             return res
 
-
-        # 2) 실제 점찍기 실행 (기존 코드 최대 유지)
+        current_pen = None  # 지금 잡고 있는 펜(v) # 안잡고 있다고 이니시에이트.
+        
+        
+        # ==================================
+        # 실제 동작 실행 코드
+        # ==================================
         try:
-            movej(JReady, vel=VELOCITY, acc=ACC)
+            movej(JReady, vel=100, acc=100)
 
             x0, y0, v0 = plan[0]
-            go_xy_up(x0, y0, z_up, rx, ry, rz, VELOCITY, ACC)
+            v0 = int(v0)
+            
+            # 첫 펜 잡기: v0에 해당하는 펜을 스테이션에서 집음
+            change_pen_by_v(current_pen, v0, rx, ry, rz, VELOCITY, ACC)
+            current_pen = v0
 
-            prev_v = int(v0)
+            go_xy_up(x0, y0, PEN_TRAVEL_Z, rx, ry, rz, VELOCITY, ACC)
 
             # 첫 점 찍기
+            movel(posx([x0, y0, z_up, rx, ry, rz]), vel=VELOCITY, acc=ACC)
             movel(posx([x0, y0, z_down, rx, ry, rz]), vel=VELOCITY, acc=ACC)
             movel(posx([x0, y0, z_up, rx, ry, rz]), vel=VELOCITY, acc=ACC)
             
-            ### 디버깅용 ###
-            self.get_logger().info(f"[DRAW] 1/{total} 번째 점 완료 (v={prev_v})")
-            ###############
+            # 디버깅
+            self.get_logger().info(f"[DRAW] 1/{total} 번째 점 완료 (v={current_pen})")
 
             # feedback (첫 점 완료)
-            self._publish_feedback(goal_handle, 1, total, prev_v)
+            self._publish_feedback(goal_handle, 1, total, current_pen)
 
             for i in range(total - 1):
                 # cancle request가 들어왔을 경우.
@@ -229,15 +344,25 @@ class DotDrawerAction(Node):
                 x2, y2, v2 = plan[i + 1]
                 v2 = int(v2)
 
-                # 색이 바뀔 경우 들어올리기
-                if i > 0 and v2 != prev_v:
-                    self.get_logger().info(f"v change {prev_v} -> {v2}: lift")
-                    lift_high_at_xy(x1, y1, z_lift, rx, ry, rz, VELOCITY, ACC)
-                    go_xy_up(x2, y2, z_up, rx, ry, rz, VELOCITY, ACC)
-                    prev_v = v2
+                # 색이 바뀔 경우 펜 변경
+                if i > 0 and v2 != current_pen:
+                    self.get_logger().info(f"v change {current_pen} -> {v2}: lift + pen swap")
+                    
+                    lift_high_at_xy(x1, y1, PEN_TRAVEL_Z, rx, ry, rz, VELOCITY, ACC)  # 그림 위치에서 먼저 충분히 상승
+                    change_pen_by_v(current_pen, v2, rx, ry, rz, VELOCITY, ACC) # 스테이션에서 내려놓고 새로 집기(안전높이 포함)
+                    current_pen = v2
+
+                    go_xy_up(x2, y2, PEN_TRAVEL_Z, rx, ry, rz, VELOCITY, ACC) 
+                    go_xy_up(x2, y2, z_up, rx, ry, rz, VELOCITY, ACC)                 # 다음 점 시작점 접근
+                    movel(posx([x2, y2, z_down+1, rx, ry, rz]), vel=VELOCITY, acc=ACC)  # 직접 찍기
+                    
+                    done = i + 2
+                    self._publish_feedback(goal_handle, done, total, current_pen)
+
+                    continue # 아래의 movec를 이번 턴에 안타게 함
 
                 movec_mid_to_next_down(
-                    x1, y1, x2, y2,
+                    x2, y2,
                     z_up=z_up, z_down=z_down,
                     rx=rx, ry=ry, rz=rz,
                     vel=VELOCITY, acc=ACC,
@@ -248,12 +373,12 @@ class DotDrawerAction(Node):
                 done = i + 2
 
                 ### 디버깅용 ###
-                self.get_logger().info(f"[DRAW] {done}/{total} 번째 점 완료 (v={prev_v})")
+                self.get_logger().info(f"[DRAW] {done}/{total} 번째 점 완료 (v={current_pen})")
                 ##############
 
-                self._publish_feedback(goal_handle, done, total, prev_v)
+                self._publish_feedback(goal_handle, done, total, current_pen)
 
-            movej(JReady, vel=VELOCITY, acc=ACC)
+            # movej(JReady, vel=VELOCITY, acc=ACC)
             self.get_logger().info(f"Drawing done ({total} dots). elapsed={time.time()-t0:.2f}s")
 
             goal_handle.succeed()
@@ -268,7 +393,45 @@ class DotDrawerAction(Node):
             res.success = False
             return res
 
-        finally:
+        # =========================================
+        # 작업 종료 시: 현재 펜을 스테이션에 내려놓고 마무리 
+        # =========================================
+
+        finally: 
+            try:
+                if current_pen is not None and current_pen in PEN_PICK_TABLE:
+                    from DSR_ROBOT2 import posx, movel, set_digital_output, get_digital_input, wait
+
+                    # (안전) 현재 위치에서 충분히 들어올리기 (펜 들고 이동 시 충돌 방지)
+                    try:
+                        # 마지막 점 좌표를 알고 있으면 거기서 lift
+                        x_end, y_end, _ = plan[-1]
+                        lift_high_at_xy(x_end, y_end, PEN_TRAVEL_Z, rx, ry, rz, VELOCITY, ACC)
+                    except Exception:
+                        # plan이 없거나 좌표 못 얻으면 생략
+                        pass
+
+                    put_x, put_y = PEN_PICK_TABLE[current_pen]
+
+                    # 스테이션 접근(충돌 방지 높이)
+                    movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                    movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                    movel(posx([put_x, put_y, PEN_Z_DOWN,   rx, ry, rz]), vel=VELOCITY, acc=ACC)
+
+                    # 펜 내려놓기
+                    gripper_release(set_digital_output, wait, get_digital_input)
+
+                    # 다시 안전 높이로
+                    movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                    movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                    movej(JReady, vel=100, acc=100)
+
+                    self.get_logger().info(f"[END] Pen #{current_pen} placed back to station.")
+                    current_pen = None
+
+            except Exception as e:
+                self.get_logger().warn(f"[END] Failed to place pen back: {e}")
+
             self._busy = False
 
 

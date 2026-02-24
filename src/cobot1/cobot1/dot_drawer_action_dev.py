@@ -341,10 +341,13 @@ class DotDrawerAction(Node):
             self._publish_feedback(goal_handle, 1, total, current_pen)
 
             for i in range(total - 1):
-                if self._shutdown_requested: # ctrl + c
-                    self.get_logger().warn("Safe shutdown requested during drawing.")
-                    goal_handle.abort()
-                    raise Exception("Shutdown requested")
+                for i in range(total - 1):
+                    if self._shutdown_requested:
+                        self.get_logger().warn("Safe shutdown requested during drawing.")
+                        goal_handle.abort()
+                        self._busy = False
+                        # finally에서 펜 내려놓고 종료
+                        return DrawStipple.Result(success=False)
                 # cancle request가 들어왔을 경우.
                 if goal_handle.is_cancel_requested:
                     self.get_logger().warn("Canceled by client")
@@ -467,6 +470,8 @@ def main(args=None):
     def sigint_handler(signum, frame):
         print("\nSIGINT received. Safe shutdown requested.")
         node.request_shutdown()
+        # rclpy.spin(node)를 깨워 종료 가능하게
+        rclpy.shutdown()
 
     signal.signal(signal.SIGINT, sigint_handler)
     try:

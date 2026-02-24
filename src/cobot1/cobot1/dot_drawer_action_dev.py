@@ -221,9 +221,12 @@ class DotDrawerAction(Node):
             goal_callback=self.goal_callback,
             cancel_callback=self.cancel_callback,
         )
+        self._shutdown_requested = False # ctrl + c
 
         self.get_logger().info("ActionServer ready: /draw_stipple (dot_msgs/DrawStipple)")
 
+    def request_shutdown(self):
+        self._shutdown_requested = True
 
     def goal_callback(self, goal_request: DrawStipple.Goal):
         # 동시에 여러 개 goal 받지 않기
@@ -336,6 +339,10 @@ class DotDrawerAction(Node):
             self._publish_feedback(goal_handle, 1, total, current_pen)
 
             for i in range(total - 1):
+                if self._shutdown_requested: # ctrl + c
+                    self.get_logger().warn("Safe shutdown requested during drawing.")
+                    goal_handle.abort()
+                    raise Exception("Shutdown requested")
                 # cancle request가 들어왔을 경우.
                 if goal_handle.is_cancel_requested:
                     self.get_logger().warn("Canceled by client")
@@ -453,7 +460,13 @@ def main(args=None):
 
     node = DotDrawerAction()
     DR_init.__dsr__node = node
+    import signal
 
+    def sigint_handler(signum, frame):
+        print("\nSIGINT received. Safe shutdown requested.")
+        node.request_shutdown()
+
+    signal.signal(signal.SIGINT, sigint_handler)
     try:
         initialize_robot()
         rclpy.spin(node)

@@ -292,7 +292,9 @@ class DotDrawerAction(Node):
             plan = point_list
         except Exception as e:
             self.get_logger().error(f"Planner error: {e}")
-            goal_handle.abort()
+            if goal_handle.is_active:
+                goal_handle.abort()
+
             self._busy = False
             res = DrawStipple.Result()
             res.success = False

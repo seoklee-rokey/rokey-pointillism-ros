@@ -341,13 +341,12 @@ class DotDrawerAction(Node):
             self._publish_feedback(goal_handle, 1, total, current_pen)
 
             for i in range(total - 1):
-                for i in range(total - 1):
-                    if self._shutdown_requested:
-                        self.get_logger().warn("Safe shutdown requested during drawing.")
-                        goal_handle.abort()
-                        self._busy = False
-                        # finally에서 펜 내려놓고 종료
-                        return DrawStipple.Result(success=False)
+                if self._shutdown_requested:
+                    self.get_logger().warn("Safe shutdown requested during drawing.")
+                    goal_handle.abort()
+                    self._busy = False
+                    # finally에서 펜 내려놓고 종료
+                    return DrawStipple.Result(success=False)
                 # cancle request가 들어왔을 경우.
                 if goal_handle.is_cancel_requested:
                     self.get_logger().warn("Canceled by client")
@@ -363,7 +362,11 @@ class DotDrawerAction(Node):
                     res = DrawStipple.Result()
                     res.success = False
                     return res
-
+                if self._shutdown_requested:
+                    self.get_logger().warn("Safe shutdown requested before moving to next point.")
+                    goal_handle.abort()
+                    self._busy = False
+                    return DrawStipple.Result(success=False)
                 # 여기서부터 찍기코드
                 x1, y1, v1 = plan[i]
                 x2, y2, v2 = plan[i + 1]
@@ -385,7 +388,11 @@ class DotDrawerAction(Node):
                     self._publish_feedback(goal_handle, done, total, current_pen)
 
                     continue # 아래의 movec를 이번 턴에 안타게 함
-
+                if self._shutdown_requested:
+                    self.get_logger().warn("Safe shutdown requested before moving to next point.")
+                    goal_handle.abort()
+                    self._busy = False
+                    return DrawStipple.Result(success=False)
                 movec_mid_to_next_down(
                     x2, y2,
                     z_up=z_up, z_down=z_down,
@@ -459,29 +466,32 @@ class DotDrawerAction(Node):
 
             self._busy = False
 
-
 def main(args=None):
     rclpy.init(args=args)
-
     node = DotDrawerAction()
     DR_init.__dsr__node = node
+
     import signal
 
+    # SIGINT 처리: 플래그만 설정
     def sigint_handler(signum, frame):
         print("\nSIGINT received. Safe shutdown requested.")
         node.request_shutdown()
-        # rclpy.spin(node)를 깨워 종료 가능하게
-        rclpy.shutdown()
 
     signal.signal(signal.SIGINT, sigint_handler)
+
     try:
         initialize_robot()
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        print("\nInterrupted by user.")
+
+        # spin_once 루프 사용: 블로킹 spin 대신 주기적 체크
+        while rclpy.ok() and not node._shutdown_requested:
+            rclpy.spin_once(node, timeout_sec=0.1)
+
     finally:
+        print("Shutting down node...")
         node.destroy_node()
         rclpy.shutdown()
+        print("Shutdown complete.")
 
 
 if __name__ == "__main__":

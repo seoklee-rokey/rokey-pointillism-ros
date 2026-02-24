@@ -252,6 +252,7 @@ class DotDrawerAction(Node):
         else:
             fb.percent = float(done) / float(total) * 100.0
         fb.current_v = int(current_v)
+        fb.current_index = int(done)
         goal_handle.publish_feedback(fb)
 
 

@@ -6,4 +6,5 @@ bool success
 ---
 # Feedback
 float32 percent       # 0.0 ~ 100.0
+int32 current_index
 int32 current_v       # palette index (Dot.v)

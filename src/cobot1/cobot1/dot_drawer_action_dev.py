@@ -253,8 +253,9 @@ class DotDrawerAction(Node):
             fb.percent = float(done) / float(total) * 100.0
         fb.current_v = int(current_v)
         fb.current_index = int(done)
-        goal_handle.publish_feedback(fb)
+        goal_handle.publish_feedback(fb) # 
 
+   
 
     def execute_callback(self, goal_handle):
         from DSR_ROBOT2 import posx, movej, movel, DR_MV_RA_OVERRIDE

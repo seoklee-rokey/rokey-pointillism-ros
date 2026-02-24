@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
-# 여러가지 색상으로 점묘화 만들기.
-# 펜 팔레트 좌표 저장.
+# 주제: 여러가지 색상으로 점묘화 만들기.
+
+# 발전한 내용
+# OFFSET 설정한 버전.
 
 import rclpy
 import DR_init
@@ -34,28 +36,30 @@ ACC = 300
 # ===============================
 PEN_Z_UP   = 120
 PEN_TRAVEL_Z = PEN_Z_UP + 100 
-PEN_Z_DOWN =  90
+PEN_Z_DOWN = 86
+X_OFFSET = -1
+Y_OFFSET = 3
 PEN_PICK_TABLE = {
-    1:  (518.559, -305.257),
-    2:  (518.559, -266.600),
-    3:  (518.559, -227.943),
-    4:  (518.559, -189.286),
-    5:  (518.559, -150.629),
-    6:  (518.559, -111.972),
+    1:  (518.559+X_OFFSET, -305.257+Y_OFFSET),
+    2:  (518.559+X_OFFSET, -266.600+Y_OFFSET),
+    3:  (518.559+X_OFFSET, -227.943+Y_OFFSET),
+    4:  (518.559+X_OFFSET, -189.286+Y_OFFSET),
+    5:  (518.559+X_OFFSET, -150.629+Y_OFFSET),
+    6:  (518.559+X_OFFSET, -111.972+Y_OFFSET),
 
-    7:  (367.544, -305.257),
-    8:  (367.544, -266.600),
-    9:  (367.544, -227.943),
-    10: (367.544, -189.286),
-    11: (367.544, -150.629),
-    12: (367.544, -111.972),
+    7:  (367.544+X_OFFSET, -305.257+Y_OFFSET),
+    8:  (367.544+X_OFFSET, -266.600+Y_OFFSET),
+    9:  (367.544+X_OFFSET, -227.943+Y_OFFSET),
+    10: (367.544+X_OFFSET, -189.286+Y_OFFSET),
+    11: (367.544+X_OFFSET, -150.629+Y_OFFSET),
+    12: (367.544+X_OFFSET, -111.972+Y_OFFSET),
 
-    13: (227.506, -305.289),
-    14: (227.506, -266.626),
-    15: (227.506, -227.962),
-    16: (227.506, -189.299),
-    17: (227.506, -150.635),
-    18: (227.506, -111.972),
+    13: (227.506+X_OFFSET, -305.289+Y_OFFSET),
+    14: (227.506+X_OFFSET, -266.626+Y_OFFSET),
+    15: (227.506+X_OFFSET, -227.962+Y_OFFSET),
+    16: (227.506+X_OFFSET, -189.299+Y_OFFSET),
+    17: (227.506+X_OFFSET, -150.635+Y_OFFSET),
+    18: (227.506+X_OFFSET, -111.972+Y_OFFSET),
 }
 
 # 디지털 출력상태
@@ -109,10 +113,10 @@ def movec_mid_to_next_down(x2, y2,
                           z_up, z_down, rx, ry, rz, vel, acc, ra):
     from DSR_ROBOT2 import posx, movec
 
-    via = posx([x2, y2, 72,   rx, ry, rz]) # 일단 72로 정해둠.
+    via = posx([x2, y2, z_up,   rx, ry, rz]) # 일단 72로 정해둠.
     tgt = posx([x2, y2, z_down, rx, ry, rz])
 
-    movec(via, tgt, vel=vel, acc=acc, ra=ra)
+    movec(via, tgt, vel=vel, acc=acc, ra=0) # 블렌딩 없애보기 # 원래 : ra
 
 
 # ------------------------------
@@ -265,7 +269,7 @@ class DotDrawerAction(Node):
 
         # 동작 파라미터 
         JReady = [0, 0, 90, 0, 90, 0]
-        z_up = 74
+        z_up = 73
         z_down = 68
         z_lift = z_up + 30
         rx, ry, rz = 150, 179, 150

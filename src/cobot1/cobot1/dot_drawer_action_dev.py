@@ -5,10 +5,10 @@
 # 발전한 내용
 # OFFSET 설정한 버전.
 # 평탄화 완료
-# 
 
-# 디버깅 중 : 색 바꾸고 강하게 찍는현상
-# 디버깅 중 : Result 전송 못하고 터지는 현상
+# 디버깅 필요 : 색 바꾸고 강하게 찍는현상
+# 디버깅 필요 : Result 전송 못하고 터지는 현상
+# 디버깅 중 : 외력 작용시 
 
 
 import rclpy
@@ -231,7 +231,7 @@ class DotDrawerAction(Node):
             self.get_logger().warn("Reject goal: busy")
             return GoalResponse.REJECT
 
-        # 빈 데이터 거절
+        # 예외처리) 빈 데이터 거절
         if goal_request.data is None or len(goal_request.data.dots) == 0:
             self.get_logger().warn("Reject goal: empty dots")
             return GoalResponse.REJECT

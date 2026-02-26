@@ -11,11 +11,11 @@ from dot_msgs.action import DrawStipple
 from dot_msgs.msg import DotArray
 
 # Module 2 planner (workspace mapping + ordering)
-try:
-    from .robot_module.stipple_robot_planner import convert_to_robot_coords
-except ImportError:
-    # fallback when running as a script (not as an installed package)
-    from robot_module.stipple_robot_planner import convert_to_robot_coords
+# try:
+#     from .robot_module.stipple_robot_planner import convert_to_robot_coords
+# except ImportError:
+#     # fallback when running as a script (not as an installed package)
+#     from robot_module.stipple_robot_planner import convert_to_robot_coords
 
 # ==============================
 # 로봇 설정
@@ -148,8 +148,8 @@ class DotDrawerAction(Node):
         req = goal_handle.request
         incoming: DotArray = req.data
 
-        img_w = float(incoming.width)
-        img_h = float(incoming.height)  
+        # img_w = float(incoming.width)
+        # img_h = float(incoming.height)  
 
         # ---- 동작 파라미터(기존 유지) ----
         JReady = [0, 0, 90, 0, 90, 0]
@@ -162,9 +162,10 @@ class DotDrawerAction(Node):
 
         # 1) (v별) 순서 최적화 + 작업영역 좌표 변환
         try:
-            point_list = [(d.x, d.y, d.v) for d in incoming.dots]
+            # point_list = [(d.x, d.y, d.v) for d in incoming.dots]
             ########### 모듈 사용하는 지점 ############
-            plan = convert_to_robot_coords(point_list, img_w=img_w, img_h=img_h)
+            # plan = convert_to_robot_coords(point_list, img_w=img_w, img_h=img_h)
+            plan = [(d.x, d.y, d.v) for d in incoming.dots]
         except Exception as e:
             self.get_logger().error(f"Planner error: {e}")
             goal_handle.abort()

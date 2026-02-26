@@ -15,8 +15,6 @@ class DrawStippleDummyClient(Node):
     def send_dummy_goal(self):
         # 1) DotArray 만들기 (x,y는 "정규화 0~1" 가정)
         arr = DotArray()
-        arr.width = 1
-        arr.height = 1
 
         for x, y, v in [
             (0.20, 0.20, 1),

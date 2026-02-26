@@ -221,9 +221,12 @@ class DotDrawerAction(Node):
             goal_callback=self.goal_callback,
             cancel_callback=self.cancel_callback,
         )
+        self._shutdown_requested = False # ctrl + c
 
         self.get_logger().info("ActionServer ready: /draw_stipple (dot_msgs/DrawStipple)")
 
+    def request_shutdown(self):
+        self._shutdown_requested = True
 
     def goal_callback(self, goal_request: DrawStipple.Goal):
         # 동시에 여러 개 goal 받지 않기
@@ -252,12 +255,13 @@ class DotDrawerAction(Node):
         else:
             fb.percent = float(done) / float(total) * 100.0
         fb.current_v = int(current_v)
+        fb.current_index=int(done)
         goal_handle.publish_feedback(fb)
 
 
     def execute_callback(self, goal_handle):
-        from DSR_ROBOT2 import posx, movej, movel, DR_MV_RA_OVERRIDE
-
+        from DSR_ROBOT2 import posx, movej, movel, DR_MV_RA_OVERRIDE, get_robot_state, drl_script_stop, DR_QSTOP_STO
+        skip_cleanup = False #finally에서 그리퍼 건드릴지 여부
         # ---------------------------
         # 파라미터 설정 및 디버깅
         # ---------------------------
@@ -289,7 +293,9 @@ class DotDrawerAction(Node):
             plan = point_list
         except Exception as e:
             self.get_logger().error(f"Planner error: {e}")
-            goal_handle.abort()
+            if goal_handle.is_active:
+                goal_handle.abort()
+
             self._busy = False
             res = DrawStipple.Result()
             res.success = False
@@ -336,6 +342,30 @@ class DotDrawerAction(Node):
             self._publish_feedback(goal_handle, 1, total, current_pen)
 
             for i in range(total - 1):
+
+                # ✅ 1) 로봇이 비정상 상태면 여기서 "대기" (외력 풀리면 자동 재개)
+                state = get_robot_state()
+                if state not in (1, 2):  # 보통 1=STANDBY, 2=MOVING
+                    self.get_logger().warn(f"[PAUSE] robot_state={state}. Waiting recovery...")
+
+                    # 상태가 정상으로 돌아올 때까지 대기
+                    while True:
+                        # cancel 들어오면 즉시 안전 종료
+                        if goal_handle.is_cancel_requested:
+                            self.get_logger().warn("Canceled while paused")
+                            goal_handle.canceled()
+                            self._busy = False
+                            res = DrawStipple.Result()
+                            res.success = False
+                            return res
+
+                        state = get_robot_state()
+                        if state in (1, 2):
+                            self.get_logger().info("[RESUME] robot recovered. Continue drawing.")
+                            break
+
+                        time.sleep(0.1)  # 너무 빠른 폴링 방지
+
                 # cancle request가 들어왔을 경우.
                 if goal_handle.is_cancel_requested:
                     self.get_logger().warn("Canceled by client")
@@ -351,7 +381,17 @@ class DotDrawerAction(Node):
                     res = DrawStipple.Result()
                     res.success = False
                     return res
-
+                if self._shutdown_requested:
+                    self.get_logger().warn("SIGINT received, aborting goal safely...")
+                    try:
+                        # 펜 내려놓기 (finally 블록에서 이미 처리됨)
+                        goal_handle.abort()  # 클라이언트에 abort 상태 전달
+                    except Exception as e:
+                        self.get_logger().error(f"Failed to abort goal: {e}")
+                    self._busy = False
+                    res = DrawStipple.Result()
+                    res.success = False
+                    return res
                 # 여기서부터 찍기코드
                 x1, y1, v1 = plan[i]
                 x2, y2, v2 = plan[i + 1]
@@ -373,7 +413,17 @@ class DotDrawerAction(Node):
                     self._publish_feedback(goal_handle, done, total, current_pen)
 
                     continue # 아래의 movec를 이번 턴에 안타게 함
-
+                if self._shutdown_requested:
+                    self.get_logger().warn("SIGINT received, aborting goal safely...")
+                    try:
+                        # 펜 내려놓기 (finally 블록에서 이미 처리됨)
+                        goal_handle.abort()  # 클라이언트에 abort 상태 전달
+                    except Exception as e:
+                        self.get_logger().error(f"Failed to abort goal: {e}")
+                    self._busy = False
+                    res = DrawStipple.Result()
+                    res.success = False
+                    return res
                 movec_mid_to_next_down(
                     x2, y2,
                     z_up=z_up, z_down=z_down,
@@ -410,58 +460,67 @@ class DotDrawerAction(Node):
         # 작업 종료 시: 현재 펜을 스테이션에 내려놓고 마무리 
         # =========================================
 
-        finally: 
+        finally:
             try:
                 if current_pen is not None and current_pen in PEN_PICK_TABLE:
-                    from DSR_ROBOT2 import posx, movel, set_digital_output, get_digital_input, wait
-
-                    # (안전) 현재 위치에서 충분히 들어올리기 (펜 들고 이동 시 충돌 방지)
-                    try:
-                        # 마지막 점 좌표를 알고 있으면 거기서 lift
-                        x_end, y_end, _ = plan[-1]
+                    from DSR_ROBOT2 import posx, movel, set_digital_output, get_digital_input, wait, get_robot_state
+                    state = get_robot_state()
+                    
+                    if (not skip_cleanup) and state in (1, 2) and current_pen is not None and current_pen in PEN_PICK_TABLE:
+                    # 기존 펜 반납 루틴 그대로
+                        # 안전 높이 lift
+                        if plan:
+                            x_end, y_end, _ = plan[min(i, len(plan)-1)]
+                        else:
+                            x_end, y_end = 0, 0
                         lift_high_at_xy(x_end, y_end, PEN_TRAVEL_Z, rx, ry, rz, VELOCITY, ACC)
-                    except Exception:
-                        # plan이 없거나 좌표 못 얻으면 생략
-                        pass
 
-                    put_x, put_y, put_z = PEN_PICK_TABLE[current_pen]
+                        put_x, put_y, put_z = PEN_PICK_TABLE[current_pen]
 
-                    # 스테이션 접근(충돌 방지 높이)
-                    movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=VELOCITY, acc=ACC)
-                    movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=VELOCITY, acc=ACC)
-                    movel(posx([put_x, put_y, put_z,   rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                        movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                        movel(posx([put_x, put_y, PEN_Z_UP, rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                        movel(posx([put_x, put_y, put_z, rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                        gripper_release(set_digital_output, wait, get_digital_input)
+                        movel(posx([put_x, put_y, PEN_Z_UP, rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                        movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                        movej(JReady, vel=VELOCITY, acc=ACC)
 
-                    # 펜 내려놓기
-                    gripper_release(set_digital_output, wait, get_digital_input)
-
-                    # 다시 안전 높이로
-                    movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=VELOCITY, acc=ACC)
-                    movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=VELOCITY, acc=ACC)
-                    movej(JReady, vel=100, acc=100)
-
-                    self.get_logger().info(f"[END] Pen #{current_pen} placed back to station.")
-                    current_pen = None
-
+                        self.get_logger().info(f"[END] Pen #{current_pen} placed back to station.")
+                        current_pen = None
+                    else:
+                        self.get_logger().warn(
+                            f"[END] Skip pen return. skip_cleanup={skip_cleanup}, robot_state={state}, current_pen={current_pen}"
+                        )          
             except Exception as e:
                 self.get_logger().warn(f"[END] Failed to place pen back: {e}")
 
             self._busy = False
-
-
 def main(args=None):
     rclpy.init(args=args)
-
     node = DotDrawerAction()
     DR_init.__dsr__node = node
 
+    import signal
+
+    # SIGINT 처리: 플래그만 설정
+    def sigint_handler(signum, frame):
+        print("\nSIGINT received. Safe shutdown requested.")
+        node.request_shutdown()
+
+    signal.signal(signal.SIGINT, sigint_handler)
+
     try:
         initialize_robot()
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        print("\nInterrupted by user.")
+
+        # spin_once 루프 사용: 블로킹 spin 대신 주기적 체크
+        while rclpy.ok() and not node._shutdown_requested:
+            rclpy.spin_once(node, timeout_sec=0.1)
+
     finally:
+        print("Shutting down node...")
         node.destroy_node()
         rclpy.shutdown()
+        print("Shutdown complete.")
 
 
 if __name__ == "__main__":

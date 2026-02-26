@@ -69,7 +69,6 @@ def perform_task():
     # ===== movesx 실행 =====
     movesx(path, vel=VELOCITY, acc=ACC)
 
-
 def main(args=None):
     rclpy.init(args=args)
     node = rclpy.create_node("movesx_dot_test", namespace=ROBOT_ID)

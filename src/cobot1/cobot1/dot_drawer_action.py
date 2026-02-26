@@ -4,6 +4,11 @@
 
 # 발전한 내용
 # OFFSET 설정한 버전.
+# 평탄화 완료
+
+# 디버깅 중 : 색 바꾸고 강하게 찍는현상
+# 디버깅 중 : Result 전송 못하고 터지는 현상
+
 
 import rclpy
 import DR_init
@@ -37,29 +42,32 @@ ACC = 300
 PEN_Z_UP   = 120
 PEN_TRAVEL_Z = PEN_Z_UP + 100 
 PEN_Z_DOWN = 86
-X_OFFSET = -1
-Y_OFFSET = 3
+X_OFFSET = 1.3
+Y_OFFSET = -0.4
 PEN_PICK_TABLE = {
-    1:  (518.559+X_OFFSET, -305.257+Y_OFFSET),
-    2:  (518.559+X_OFFSET, -266.600+Y_OFFSET),
-    3:  (518.559+X_OFFSET, -227.943+Y_OFFSET),
-    4:  (518.559+X_OFFSET, -189.286+Y_OFFSET),
-    5:  (518.559+X_OFFSET, -150.629+Y_OFFSET),
-    6:  (518.559+X_OFFSET, -111.972+Y_OFFSET),
+    # Right column (1~6)
+    1:  (515.972+X_OFFSET, -302.237+Y_OFFSET, 82.827),
+    2:  (516.289+X_OFFSET, -263.584+Y_OFFSET, 82.833),
+    3:  (517.807+X_OFFSET, -224.931+Y_OFFSET, 82.839),
+    4:  (516.924+X_OFFSET, -186.278+Y_OFFSET, 82.845),
+    5:  (517.242+X_OFFSET, -147.625+Y_OFFSET, 82.851),
+    6:  (517.559+X_OFFSET, -108.972+Y_OFFSET, 82.857),
 
-    7:  (367.544+X_OFFSET, -305.257+Y_OFFSET),
-    8:  (367.544+X_OFFSET, -266.600+Y_OFFSET),
-    9:  (367.544+X_OFFSET, -227.943+Y_OFFSET),
-    10: (367.544+X_OFFSET, -189.286+Y_OFFSET),
-    11: (367.544+X_OFFSET, -150.629+Y_OFFSET),
-    12: (367.544+X_OFFSET, -111.972+Y_OFFSET),
+    # Middle column (7~12)
+    7:  (367.570+X_OFFSET, -300.730+Y_OFFSET, 83.130),
+    8:  (367.863+X_OFFSET, -262.382+Y_OFFSET, 82.899),
+    9:  (367.156+X_OFFSET, -224.035+Y_OFFSET, 82.669),
+    10: (367.449+X_OFFSET, -185.688+Y_OFFSET, 82.438),
+    11: (367.742+X_OFFSET, -147.341+Y_OFFSET, 82.208),
+    12: (367.035+X_OFFSET, -108.993+Y_OFFSET, 81.977),
 
-    13: (227.506+X_OFFSET, -305.289+Y_OFFSET),
-    14: (227.506+X_OFFSET, -266.626+Y_OFFSET),
-    15: (227.506+X_OFFSET, -227.962+Y_OFFSET),
-    16: (227.506+X_OFFSET, -189.299+Y_OFFSET),
-    17: (227.506+X_OFFSET, -150.635+Y_OFFSET),
-    18: (227.506+X_OFFSET, -111.972+Y_OFFSET),
+    # Left column (13~18)
+    13: (228.367+X_OFFSET, -299.322+Y_OFFSET, 82.133),
+    14: (228.136+X_OFFSET, -261.581+Y_OFFSET, 82.144),
+    15: (228.005+X_OFFSET, -223.339+Y_OFFSET, 82.855),
+    16: (228.373+X_OFFSET, -185.098+Y_OFFSET, 82.566),
+    17: (228.442+X_OFFSET, -147.056+Y_OFFSET, 82.277),
+    18: (228.511+X_OFFSET, -109.015+Y_OFFSET, 81.989),
 }
 
 # 디지털 출력상태
@@ -159,13 +167,13 @@ def change_pen_by_v(prev_v: int, target_v: int, rx, ry, rz, vel, acc):
     if prev_v is None:
         gripper_release(set_digital_output, wait, get_digital_input)
 
-        pick_x, pick_y = PEN_PICK_TABLE[target_v]
+        pick_x, pick_y, pick_z = PEN_PICK_TABLE[target_v]
         # 스테이션 접근(충돌 방지 높이)
         movel(posx([pick_x, pick_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=vel, acc=acc)
-        movel(posx([pick_x, pick_y, PEN_Z_UP,      rx, ry, rz]), vel=vel, acc=acc)
-        movel(posx([pick_x, pick_y, PEN_Z_DOWN,    rx, ry, rz]), vel=vel, acc=acc)
+        # movel(posx([pick_x, pick_y, PEN_Z_UP,      rx, ry, rz]), vel=vel, acc=acc)
+        movel(posx([pick_x, pick_y, pick_z,    rx, ry, rz]), vel=vel, acc=acc)
         gripper_grip(set_digital_output, wait, get_digital_input)
-        movel(posx([pick_x, pick_y, PEN_Z_UP,      rx, ry, rz]), vel=vel, acc=acc)
+        # movel(posx([pick_x, pick_y, PEN_Z_UP,      rx, ry, rz]), vel=vel, acc=acc)
         movel(posx([pick_x, pick_y, PEN_TRAVEL_Z,  rx, ry, rz]), vel=vel, acc=acc)
         return
     
@@ -174,23 +182,23 @@ def change_pen_by_v(prev_v: int, target_v: int, rx, ry, rz, vel, acc):
         change_pen_by_v(None, target_v, rx, ry, rz, vel, acc)
         return
     
-    put_x, put_y   = PEN_PICK_TABLE[prev_v]
-    pick_x, pick_y = PEN_PICK_TABLE[target_v]
+    put_x, put_y, put_z   = PEN_PICK_TABLE[prev_v]
+    pick_x, pick_y, pick_z = PEN_PICK_TABLE[target_v]
 
     # prev_v 펜 내려놓기
     movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=vel, acc=acc)
-    movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
-    movel(posx([put_x, put_y, PEN_Z_DOWN,   rx, ry, rz]), vel=vel, acc=acc)
+    # movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
+    movel(posx([put_x, put_y, put_z,   rx, ry, rz]), vel=vel, acc=acc)
     gripper_release(set_digital_output, wait, get_digital_input)
-    movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
+    # movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
     movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=vel, acc=acc)
 
     # target_v 펜 집기+ 들어올리기 
     movel(posx([pick_x, pick_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=vel, acc=acc)
-    movel(posx([pick_x, pick_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
-    movel(posx([pick_x, pick_y, PEN_Z_DOWN,   rx, ry, rz]), vel=vel, acc=acc)
+    # movel(posx([pick_x, pick_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
+    movel(posx([pick_x, pick_y, pick_z ,   rx, ry, rz]), vel=vel, acc=acc)
     gripper_grip(set_digital_output, wait, get_digital_input)
-    movel(posx([pick_x, pick_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
+    # movel(posx([pick_x, pick_y, PEN_Z_UP,     rx, ry, rz]), vel=vel, acc=acc)
     movel(posx([pick_x, pick_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=vel, acc=acc)
 
 
@@ -222,7 +230,7 @@ class DotDrawerAction(Node):
             self.get_logger().warn("Reject goal: busy")
             return GoalResponse.REJECT
 
-        # 빈 데이터 거절
+        # 예외처리) 빈 데이터 거절
         if goal_request.data is None or len(goal_request.data.dots) == 0:
             self.get_logger().warn("Reject goal: empty dots")
             return GoalResponse.REJECT
@@ -243,8 +251,10 @@ class DotDrawerAction(Node):
         else:
             fb.percent = float(done) / float(total) * 100.0
         fb.current_v = int(current_v)
-        goal_handle.publish_feedback(fb)
+        fb.current_index = int(done)
+        goal_handle.publish_feedback(fb) # 
 
+   
 
     def execute_callback(self, goal_handle):
         from DSR_ROBOT2 import posx, movej, movel, DR_MV_RA_OVERRIDE
@@ -270,7 +280,7 @@ class DotDrawerAction(Node):
         # 동작 파라미터 
         JReady = [0, 0, 90, 0, 90, 0]
         z_up = 73
-        z_down = 68
+        z_down = 67
         z_lift = z_up + 30
         rx, ry, rz = 150, 179, 150
 
@@ -358,7 +368,7 @@ class DotDrawerAction(Node):
 
                     go_xy_up(x2, y2, PEN_TRAVEL_Z, rx, ry, rz, VELOCITY, ACC) 
                     go_xy_up(x2, y2, z_up, rx, ry, rz, VELOCITY, ACC)                 # 다음 점 시작점 접근
-                    movel(posx([x2, y2, z_down+1, rx, ry, rz]), vel=VELOCITY, acc=ACC)  # 직접 찍기
+                    movel(posx([x2, y2, z_down+0.4, rx, ry, rz]), vel=VELOCITY, acc=ACC)  # 직접 찍기
                     
                     done = i + 2
                     self._publish_feedback(goal_handle, done, total, current_pen)
@@ -415,12 +425,12 @@ class DotDrawerAction(Node):
                         # plan이 없거나 좌표 못 얻으면 생략
                         pass
 
-                    put_x, put_y = PEN_PICK_TABLE[current_pen]
+                    put_x, put_y, put_z = PEN_PICK_TABLE[current_pen]
 
                     # 스테이션 접근(충돌 방지 높이)
                     movel(posx([put_x, put_y, PEN_TRAVEL_Z, rx, ry, rz]), vel=VELOCITY, acc=ACC)
                     movel(posx([put_x, put_y, PEN_Z_UP,     rx, ry, rz]), vel=VELOCITY, acc=ACC)
-                    movel(posx([put_x, put_y, PEN_Z_DOWN,   rx, ry, rz]), vel=VELOCITY, acc=ACC)
+                    movel(posx([put_x, put_y, put_z,   rx, ry, rz]), vel=VELOCITY, acc=ACC)
 
                     # 펜 내려놓기
                     gripper_release(set_digital_output, wait, get_digital_input)

@@ -28,6 +28,7 @@ setup(
             'dot_drawer_action = cobot1.dot_drawer_action:main',
             'dot_dummy_client = cobot1.dot_dummy_client:main',
             'check_robot_state_recovery = cobot1.check_robot_state_recovery:main',
+            'action_bridge_node = cobot1.action_bridge_node:main',
         ],
     },
 )

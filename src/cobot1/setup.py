@@ -26,9 +26,7 @@ setup(
         'console_scripts': [
             'mini_jog = cobot1.mini_jog:main',
             'dot_drawer_action = cobot1.dot_drawer_action:main',
-            'dot_drawer_action_dev = cobot1.dot_drawer_action_dev:main',
             'dot_dummy_client = cobot1.dot_dummy_client:main',
-            'test_gipper = cobot1.test_gipper:main',
             'check_robot_state_recovery = cobot1.check_robot_state_recovery:main',
         ],
     },

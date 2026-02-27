@@ -99,7 +99,7 @@ def initialize_robot():
     print(f"ROBOT_MODEL: {ROBOT_MODEL}")
     print(f"ROBOT_TCP: {get_tcp()}") 
     print(f"ROBOT_TOOL: {get_tool()}")
-    print(f"ROBOT_MODE 0:수동, 1:자동 : {get_robot_mode()}")
+    print(f"ROBOT_MODE: 현재모드={get_robot_mode()} (수동:0, 자동:1)")
     print(f"VELOCITY: {VELOCITY}")
     print(f"ACC: {ACC}")
     print("#" * 50)
